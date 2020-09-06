@@ -1,47 +1,60 @@
+#include <arpa/inet.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
-#include <libssh2.h>
 
-typedef struct {
-    const char *hostname;
-    uint16_t port;
-    int socket ;
-    LIBSSH2_SESSION *session;
-    LIBSSH2_CHANNEL *channel;
-} sshcon_connection;
+#include "sshcon/sshcon.h"
 
-static bool sshcon_connect(sshcon_connection *sc) {
-    const char *commandline = "uptime";
-    unsigned long hostaddr;
-    struct sockaddr_in sin;
-    int rc;
-    int exitcode;
-    char *exitsignal = (char *)"none";
-    int bytecount = 0;
+sshcon_status sshcon_connect(sshcon_connection *sc) {
+  LIBSSH2_SESSION *session;
+  unsigned long hostaddr;
+  struct sockaddr_in sin;
+  int sock;
 
-    rc = libssh2_init(0);
-    if(rc != 0) {
-        fprintf(stderr, "libssh2 initialization failed (%d)\n", rc);
-        return false;
-    }
- 
-    hostaddr = inet_addr(sc->hostname);
-    sc->socket = socket(AF_INET, SOCK_STREAM, 0);
-    sin.sin_family = AF_INET;
-    sin.sin_port = htons(22);
-    sin.sin_addr.s_addr = hostaddr;
-    if(connect(sc->socket, (struct sockaddr*)(&sin),
-                sizeof(struct sockaddr_in)) != 0) {
-        fprintf(stderr, "failed to connect!\n");
-        return -1;
-    }
+  if (libssh2_init(0)) {
+    return SSHCON_ERROR_LIBSSH2_INIT_FAILED;
+  }
 
-    // create non-blocking session
-    session = libssh2_session_init();
-    if (!session) {
-      goto fatalerror;
-    }
-    libssh2_session_set_blocking(session, 0);
+  hostaddr = inet_addr(sc->hostname);
+  sock = socket(AF_INET, SOCK_STREAM, 0);
+  sin.sin_family = AF_INET;
+  sin.sin_port = htons(sc->port);
+  sin.sin_addr.s_addr = hostaddr;
+  int rc = connect(sc->socket, (struct sockaddr *)(&sin),
+                   sizeof(struct sockaddr_in));
+  if (rc != 0) {
+    return SSHCON_ERROR_CONNECT_FAILED;
+  }
+
+  session = libssh2_session_init();
+  if (!session) {
+    return SSHCON_ERROR_LIBSSH2_SESSION_INIT_FAILED;
+  }
+
+  // set session to non-blocking
+  libssh2_session_set_blocking(session, 0);
+
+  sc->socket = sock;
+  sc->session = session;
+
+  return SSHCON_OK;
+}
+
+void sshcon_error_info(sshcon_status err) {
+  switch (err) {
+  case SSHCON_ERROR_UNDEFINED:
+    break;
+  case SSHCON_OK:
+    break;
+  case SSHCON_ERROR_LIBSSH2_INIT_FAILED:
+    break;
+  case SSHCON_ERROR_CONNECT_FAILED:
+    break;
+    fprintf(stderr, "connect() failed: %s\n", strerror(errno));
+    break;
+  case SSHCON_ERROR_LIBSSH2_SESSION_INIT_FAILED:
+    break;
+  }
 }
