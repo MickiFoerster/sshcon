@@ -203,7 +203,49 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
     }
     prev_identity = identity;
   }
+  conn->agent = agent;
 
   return SSHCON_OK;
+}
+
+sshcon_status sshconn_open_channel(sshcon_connection *conn) {
+    LIBSSH2_CHANNEL *channel;
+    while (
+       (channel = libssh2_channel_open_session(session)) == NULL &&
+       libssh2_session_last_error(session, NULL, NULL, 0) == LIBSSH2_ERROR_EAGAIN) {
+      wait(conn);
+    }
+    if (channel == NULL) {
+        return SSHCON_ERROR_CHANNEL_OPEN_SESSION;
+    }
+    conn->channel = channel;
+
+    return SSHCON_OK;
+}
+
+static int wait(sshcon_connection *conn) {
+  struct timeval timeout;
+  int rc;
+  fd_set fd;
+  fd_set *writefd = NULL;
+  fd_set *readfd = NULL;
+  int dir;
+
+  timeout.tv_sec = 10;
+  timeout.tv_usec = 0;
+
+  FD_ZERO(&fd);
+  FD_SET(conn->socket, &fd);
+
+  /* now make sure we wait in the correct direction */
+  dir = libssh2_session_block_directions(conn->session);
+  if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
+    readfd = &fd;
+  if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
+    writefd = &fd;
+
+  rc = select(conn->socket + 1, readfd, writefd, NULL, &timeout);
+
+  return rc;
 }
 
