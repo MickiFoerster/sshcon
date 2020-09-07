@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -71,11 +72,9 @@ void sshcon_disconnect(sshcon_connection *sc) {
     libssh2_exit();
 }
 
-sshcon_status sshcon_check_knownhosts(sshcon_connection *sc) {
-  LIBSSH2_SESSION *session = sc->session;
-  const char *hostname = sc->hostname;
+sshcon_status sshcon_check_knownhosts(sshcon_connection *conn) {
   LIBSSH2_KNOWNHOSTS *nh;
-  nh = libssh2_knownhost_init(session);
+  nh = libssh2_knownhost_init(conn->session);
   if (!nh) {
     return SSHCON_ERROR_KNOWNHOST_INIT;
   }
@@ -89,51 +88,74 @@ sshcon_status sshcon_check_knownhosts(sshcon_connection *sc) {
   if (rc <= 0) {
     fprintf(stderr, "error: reading known host file error %d\n", rc);
     libssh2_knownhost_free(nh);
-    return false;
+    return SSHCON_ERROR_KNOWNHOST_FILE_READ;
   }
 
   size_t len;
   int type;
-  fingerprint = libssh2_session_hostkey(session, &len, &type);
+  fingerprint = libssh2_session_hostkey(conn->session, &len, &type);
   if (!fingerprint) {
     fprintf(stderr, "error: libssh2_session_hostkey() failed\n");
     libssh2_knownhost_free(nh);
-    return false;
+    return SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY;
   }
 
   struct libssh2_knownhost *host;
-  int check = libssh2_knownhost_checkp(
-      nh, hostname, 22, fingerprint, len,
-      LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
+  int check = libssh2_knownhost_checkp(nh, 
+                                       conn->hostname, 
+                                       conn->port, 
+                                       fingerprint, 
+                                       len,
+                                       LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
+  fprintf(stderr, "DEBUG: check=%d\n", check);
   libssh2_knownhost_free(nh);
 
   switch (check) {
   case LIBSSH2_KNOWNHOST_CHECK_MATCH:
-    return true;
+    return SSHCON_OK;
   case LIBSSH2_KNOWNHOST_CHECK_FAILURE:
+    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE;
   case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND:
+    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND;
   case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
+    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH;
   default:
-    return false;
+    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY;
   }
 }
 
-void sshcon_error_info(sshcon_status err) {
-  switch (err) {
-      case SSHCON_ERROR_UNDEFINED:
-          break;
-      case SSHCON_OK:
-          break;
-      case SSHCON_ERROR_SOCKET:
-          break;
-      case SSHCON_ERROR_LIBSSH2_INIT:
-          break;
-      case SSHCON_ERROR_CONNECT:
-          fprintf(stderr, "connect() failed: %s\n", strerror(errno));
-          break;
-      case SSHCON_ERROR_LIBSSH2_SESSION_INIT:
-          break;
-      case SSHCON_ERROR_LIBSSH2_SESSION_HANDSHAKE:
-          break;
-  }
+void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
+    char *errmsg;
+    int errlen;
+    switch (err) {
+        case SSHCON_ERROR_UNDEFINED:
+            break;
+        case SSHCON_OK:
+            break;
+        case SSHCON_ERROR_SOCKET:
+            fprintf(stderr, "select() failed: (%d) %s\n", errno, strerror(errno));
+            break;
+        case SSHCON_ERROR_CONNECT:
+            fprintf(stderr, "connect() failed: (%d) %s\n", errno, strerror(errno));
+            break;
+        case SSHCON_ERROR_LIBSSH2_INIT:
+        case SSHCON_ERROR_LIBSSH2_SESSION_INIT:
+        case SSHCON_ERROR_LIBSSH2_SESSION_HANDSHAKE:
+        case SSHCON_ERROR_KNOWNHOST_INIT:
+        case SSHCON_ERROR_KNOWNHOST_FILE_READ:
+        case SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY:
+        case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY:
+            libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
+            fprintf(stderr, "sshcon error %d: (%d) %s\n", err, err, errmsg);
+            break;
+        case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE:
+            fprintf(stderr, "error: check of the server's host key failed\n");
+            break;
+        case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND:
+            fprintf(stderr, "error: server's host key was not found in locally stored known-hostkey-file\n");
+            break;
+        case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH:
+            fprintf(stderr, "error: server's host key does not match local stored one, thus possible man-in-the-middle attack\n");
+            break;
+    }
 }
