@@ -17,18 +17,26 @@ typedef enum {
   SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE,
   SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND,
   SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH,
+  SSHCON_ERROR_AGENT_INIT,
+  SSHCON_ERROR_AGENT_CONNECT,
+  SSHCON_ERROR_AGENT_LIST_IDENTITIES,
+  SSHCON_ERROR_AGENT_GET_IDENTITY,
+  SSHCON_ERROR_AGENT_AUTH_FAILED,
 } sshcon_status;
 
 typedef struct {
     const char *hostname;
     uint16_t port;
+    const char *username;
     int socket ;
     LIBSSH2_SESSION *session;
+    LIBSSH2_AGENT *agent;
     LIBSSH2_CHANNEL *channel;
 
 } sshcon_connection;
 
-sshcon_status sshcon_connect(sshcon_connection *sc);
-void sshcon_disconnect(sshcon_connection *sc);
-sshcon_status sshcon_check_knownhosts(sshcon_connection *sc);
-void sshcon_error_info(sshcon_connection *sc, sshcon_status err);
+sshcon_status sshcon_connect(sshcon_connection *conn);
+void sshcon_disconnect(sshcon_connection *conn);
+sshcon_status sshcon_check_knownhosts(sshcon_connection *conn);
+void sshcon_error_info(sshcon_connection *conn, sshcon_status err);
+sshcon_status sshconn_authenticate(sshcon_connection *conn);

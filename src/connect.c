@@ -9,7 +9,7 @@
 
 #include "sshcon/sshcon.h"
 
-sshcon_status sshcon_connect(sshcon_connection *sc) {
+sshcon_status sshcon_connect(sshcon_connection *conn) {
   LIBSSH2_SESSION *session;
   unsigned long hostaddr;
   struct sockaddr_in sin;
@@ -19,13 +19,13 @@ sshcon_status sshcon_connect(sshcon_connection *sc) {
     return SSHCON_ERROR_LIBSSH2_INIT;
   }
 
-  hostaddr = inet_addr(sc->hostname);
+  hostaddr = inet_addr(conn->hostname);
   sock = socket(AF_INET, SOCK_STREAM, 0);
   if (sock == -1) {
       return SSHCON_ERROR_SOCKET;
   }
   sin.sin_family = AF_INET;
-  sin.sin_port = htons(sc->port);
+  sin.sin_port = htons(conn->port);
   sin.sin_addr.s_addr = hostaddr;
   int rc = connect(sock, (struct sockaddr *)(&sin),
                    sizeof(struct sockaddr_in));
@@ -50,26 +50,26 @@ sshcon_status sshcon_connect(sshcon_connection *sc) {
       return SSHCON_ERROR_LIBSSH2_SESSION_HANDSHAKE;
   }
 
-  sc->socket = sock;
-  sc->session = session;
+  conn->socket = sock;
+  conn->session = session;
 
   return SSHCON_OK;
 }
 
-void sshcon_disconnect(sshcon_connection *sc) {
-    if (sc->session) {
-        libssh2_session_disconnect(sc->session, "Normal Shutdown");
-        libssh2_session_free(sc->session);
-        sc->session = NULL;
-    }
+void sshcon_disconnect(sshcon_connection *conn) {
+  if (conn->session) {
+    libssh2_session_disconnect(conn->session, "Normal Shutdown");
+    libssh2_session_free(conn->session);
+    conn->session = NULL;
+  }
 
-    if (sc->socket>0) {
-        while (close(sc->socket)==EINTR)
-            ;
-        sc->socket = -1;
-    }
+  if (conn->socket > 0) {
+    while (close(conn->socket) == EINTR)
+      ;
+    conn->socket = -1;
+  }
 
-    libssh2_exit();
+  libssh2_exit();
 }
 
 sshcon_status sshcon_check_knownhosts(sshcon_connection *conn) {
@@ -101,13 +101,9 @@ sshcon_status sshcon_check_knownhosts(sshcon_connection *conn) {
   }
 
   struct libssh2_knownhost *host;
-  int check = libssh2_knownhost_checkp(nh, 
-                                       conn->hostname, 
-                                       conn->port, 
-                                       fingerprint, 
-                                       len,
-                                       LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
-  fprintf(stderr, "DEBUG: check=%d\n", check);
+  int check = libssh2_knownhost_checkp(
+      nh, conn->hostname, conn->port, fingerprint, len,
+      LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
   libssh2_knownhost_free(nh);
 
   switch (check) {
@@ -145,9 +141,14 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
         case SSHCON_ERROR_KNOWNHOST_FILE_READ:
         case SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY:
         case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY:
-            libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
-            fprintf(stderr, "sshcon error %d: (%d) %s\n", err, err, errmsg);
-            break;
+        case SSHCON_ERROR_AGENT_INIT:
+        case SSHCON_ERROR_AGENT_CONNECT:
+        case SSHCON_ERROR_AGENT_LIST_IDENTITIES:
+        case SSHCON_ERROR_AGENT_GET_IDENTITY:
+        case SSHCON_ERROR_AGENT_AUTH_FAILED:
+          libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
+          fprintf(stderr, "sshcon error %d: (%d) %s\n", err, err, errmsg);
+          break;
         case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE:
             fprintf(stderr, "error: check of the server's host key failed\n");
             break;
@@ -159,3 +160,50 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
             break;
     }
 }
+
+sshcon_status sshconn_authenticate(sshcon_connection *conn) {
+  LIBSSH2_AGENT *agent = libssh2_agent_init(conn->session);
+  if (agent == NULL) {
+    return SSHCON_ERROR_AGENT_INIT;
+  }
+
+  int rc = libssh2_agent_connect(agent);
+  if (rc) {
+    libssh2_agent_free(agent);
+    return SSHCON_ERROR_AGENT_CONNECT;
+  }
+
+  rc = libssh2_agent_list_identities(agent);
+  if (rc) {
+    libssh2_agent_disconnect(agent);
+    libssh2_agent_free(agent);
+    return SSHCON_ERROR_AGENT_LIST_IDENTITIES;
+  }
+
+  struct libssh2_agent_publickey *identity = NULL;
+  struct libssh2_agent_publickey *prev_identity = NULL;
+  for (;;) {
+    rc = libssh2_agent_get_identity(agent, &identity, prev_identity);
+    if (rc == 1 /* end of list of public keys */) {
+      libssh2_agent_disconnect(agent);
+      libssh2_agent_free(agent);
+      return SSHCON_ERROR_AGENT_AUTH_FAILED;
+    }
+    if (rc < 0 /* error */) {
+      libssh2_agent_disconnect(agent);
+      libssh2_agent_free(agent);
+      return SSHCON_ERROR_AGENT_GET_IDENTITY;
+    }
+
+    while (libssh2_agent_userauth(agent, conn->username, identity) ==
+           LIBSSH2_ERROR_EAGAIN)
+      ;
+    if (rc == 0) {
+      break;
+    }
+    prev_identity = identity;
+  }
+
+  return SSHCON_OK;
+}
+
