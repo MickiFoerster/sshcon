@@ -47,6 +47,9 @@ int main(int argc, char *argv[]) {
   }
   printf("authenticated\n");
 
+  sshconn_open_channel(&conn);
+  sshconn_close_channel(&conn);
+
   sshcon_disconnect(&conn);
   printf("disconnected\n");
 

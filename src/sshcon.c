@@ -5,9 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "sshcon/sshcon.h"
+
+static int wait(sshcon_connection *conn);
 
 sshcon_status sshcon_connect(sshcon_connection *conn) {
   LIBSSH2_SESSION *session;
@@ -146,6 +149,7 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
         case SSHCON_ERROR_AGENT_LIST_IDENTITIES:
         case SSHCON_ERROR_AGENT_GET_IDENTITY:
         case SSHCON_ERROR_AGENT_AUTH_FAILED:
+        case SSHCON_ERROR_CHANNEL_OPEN_SESSION:
           libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
           fprintf(stderr, "sshcon error %d: (%d) %s\n", err, err, errmsg);
           break;
@@ -204,15 +208,40 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
     prev_identity = identity;
   }
   conn->agent = agent;
-
+  fprintf(stderr, "DEBUG: authenticated\n");
   return SSHCON_OK;
+}
+
+void sshconn_close_channel(sshcon_connection *conn) {
+  int exitcode = 127;
+  int rc;
+  char *exitsignal = (char *)"noexitsignal";
+  do {
+    wait(conn);
+    rc = libssh2_channel_close(conn->channel);
+  } while (rc == LIBSSH2_ERROR_EAGAIN);
+
+  if (rc == 0) {
+    exitcode = libssh2_channel_get_exit_status(conn->channel);
+    libssh2_channel_get_exit_signal(conn->channel, &exitsignal, NULL, NULL,
+                                    NULL, NULL, NULL);
+  }
+
+  if (exitsignal)
+    fprintf(stderr, "\nGot signal: %s\n", exitsignal);
+  else
+    fprintf(stderr, "\nEXIT: %d\n", exitcode);
+
+  libssh2_channel_free(conn->channel);
+
+  conn->channel = NULL;
 }
 
 sshcon_status sshconn_open_channel(sshcon_connection *conn) {
     LIBSSH2_CHANNEL *channel;
-    while (
-       (channel = libssh2_channel_open_session(session)) == NULL &&
-       libssh2_session_last_error(session, NULL, NULL, 0) == LIBSSH2_ERROR_EAGAIN) {
+    while ((channel = libssh2_channel_open_session(conn->session)) == NULL &&
+           libssh2_session_last_error(conn->session, NULL, NULL, 0) ==
+               LIBSSH2_ERROR_EAGAIN) {
       wait(conn);
     }
     if (channel == NULL) {
