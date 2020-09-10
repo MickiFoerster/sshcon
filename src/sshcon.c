@@ -161,6 +161,7 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
           fprintf(stderr, "sshcon error %d: SSH agent related error\n", err);
           break;
         case SSHCON_ERROR_CHANNEL_OPEN_SESSION:
+        case SSHCON_ERROR_CHANNEL_EXEC_COMMAND:
           libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
           fprintf(stderr, "sshcon error %d: %s\n", err, errmsg);
           break;
@@ -223,20 +224,20 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
   return SSHCON_OK;
 }
 
-sshcon_status sshconn_channel_exec(sshcon_connection *conn) {
+sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd) {
   int rc;
   for (;;) {
-    rc = libssh2_channel_exec(conn->channel, "hostname");
-    if (rc == LIBSSH2_ERROR_EAGAIN) {
-      wait(conn);
-      continue;
-    }
-    break;
+      rc = libssh2_channel_exec(conn->channel, cmd);
+      if (rc == LIBSSH2_ERROR_EAGAIN) {
+          wait(conn);
+          continue;
+      }
+      break;
   }
   if (rc != 0) {
-    fprintf(stderr, "Error\n");
-    exit(1);
+      return SSHCON_ERROR_CHANNEL_EXEC_COMMAND;
   }
+  fprintf(stderr, "->%s\n", cmd);
 
   ssize_t n;
   for (;;) {
@@ -246,7 +247,7 @@ sshcon_status sshconn_channel_exec(sshcon_connection *conn) {
       n = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
       if (n > 0) {
         int i;
-        fprintf(stderr, "We read:\n");
+        fprintf(stderr, "<-");
         for (i = 0; i < n; ++i)
           fputc(buffer[i], stderr);
         fprintf(stderr, "\n");

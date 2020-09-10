@@ -53,8 +53,13 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   printf("channel open\n");
-  sshconn_channel_exec(&conn);
-  printf("channel exed\n");
+
+  err = sshconn_channel_exec(&conn, "hostname");
+  if (err != SSHCON_OK) {
+    sshcon_error_info(&conn, err);
+    exit(1);
+  }
+
   sshconn_channel_close(&conn);
 
   sshcon_disconnect(&conn);

@@ -23,6 +23,7 @@ typedef enum {
   SSHCON_ERROR_AGENT_GET_IDENTITY,
   SSHCON_ERROR_AGENT_AUTH_FAILED,
   SSHCON_ERROR_CHANNEL_OPEN_SESSION,
+  SSHCON_ERROR_CHANNEL_EXEC_COMMAND,
 } sshcon_status;
 
 typedef struct {
@@ -43,4 +44,4 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err);
 sshcon_status sshconn_authenticate(sshcon_connection *conn);
 sshcon_status sshconn_channel_open(sshcon_connection *conn);
 void sshconn_channel_close(sshcon_connection *conn);
-sshcon_status sshconn_channel_exec(sshcon_connection *conn);
+sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd);
