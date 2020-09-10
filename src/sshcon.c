@@ -210,16 +210,16 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
       return SSHCON_ERROR_AGENT_GET_IDENTITY;
     }
 
-    while (libssh2_agent_userauth(agent, conn->username, identity) ==
+    while ((rc=libssh2_agent_userauth(agent, conn->username, identity)) ==
            LIBSSH2_ERROR_EAGAIN)
       ;
     if (rc == 0) {
-      break;
+      break; // authenticated
     }
     prev_identity = identity;
   }
   conn->agent = agent;
-  fprintf(stderr, "DEBUG: authenticated\n");
+
   return SSHCON_OK;
 }
 
@@ -267,7 +267,7 @@ sshcon_status sshconn_channel_exec(sshcon_connection *conn) {
   return SSHCON_OK;
 }
 
-void sshconn_close_channel(sshcon_connection *conn) {
+void sshconn_channel_close(sshcon_connection *conn) {
   int exitcode = 127;
   int rc;
   char *exitsignal = (char *)"noexitsignal";
@@ -292,12 +292,13 @@ void sshconn_close_channel(sshcon_connection *conn) {
   conn->channel = NULL;
 }
 
-sshcon_status sshconn_open_channel(sshcon_connection *conn) {
+sshcon_status sshconn_channel_open(sshcon_connection *conn) {
     LIBSSH2_CHANNEL *channel;
     while ((channel = libssh2_channel_open_session(conn->session)) == NULL &&
            libssh2_session_last_error(conn->session, NULL, NULL, 0) ==
                LIBSSH2_ERROR_EAGAIN) {
-      wait(conn);
+        sleep(1);
+      //wait(conn);
     }
     if (channel == NULL) {
         return SSHCON_ERROR_CHANNEL_OPEN_SESSION;
