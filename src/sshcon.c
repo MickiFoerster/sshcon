@@ -139,19 +139,30 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
             break;
         case SSHCON_ERROR_LIBSSH2_INIT:
         case SSHCON_ERROR_LIBSSH2_SESSION_INIT:
+          fprintf(stderr, "sshcon error %d: libssh2 init related error\n", err);
+          break;
         case SSHCON_ERROR_LIBSSH2_SESSION_HANDSHAKE:
+          fprintf(stderr, "sshcon error %d: SSH handshake related error\n",
+                  err);
+          break;
         case SSHCON_ERROR_KNOWNHOST_INIT:
         case SSHCON_ERROR_KNOWNHOST_FILE_READ:
         case SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY:
         case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY:
+          fprintf(stderr,
+                  "sshcon error %d: SSH known host checking related error\n",
+                  err);
+          break;
         case SSHCON_ERROR_AGENT_INIT:
         case SSHCON_ERROR_AGENT_CONNECT:
         case SSHCON_ERROR_AGENT_LIST_IDENTITIES:
         case SSHCON_ERROR_AGENT_GET_IDENTITY:
         case SSHCON_ERROR_AGENT_AUTH_FAILED:
+          fprintf(stderr, "sshcon error %d: SSH agent related error\n", err);
+          break;
         case SSHCON_ERROR_CHANNEL_OPEN_SESSION:
           libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
-          fprintf(stderr, "sshcon error %d: (%d) %s\n", err, err, errmsg);
+          fprintf(stderr, "sshcon error %d: %s\n", err, errmsg);
           break;
         case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE:
             fprintf(stderr, "error: check of the server's host key failed\n");
@@ -209,6 +220,50 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
   }
   conn->agent = agent;
   fprintf(stderr, "DEBUG: authenticated\n");
+  return SSHCON_OK;
+}
+
+sshcon_status sshconn_channel_exec(sshcon_connection *conn) {
+  int rc;
+  for (;;) {
+    rc = libssh2_channel_exec(conn->channel, "hostname");
+    if (rc == LIBSSH2_ERROR_EAGAIN) {
+      wait(conn);
+      continue;
+    }
+    break;
+  }
+  if (rc != 0) {
+    fprintf(stderr, "Error\n");
+    exit(1);
+  }
+
+  ssize_t n;
+  for (;;) {
+    /* loop until we block */
+    do {
+      char buffer[0x4000];
+      n = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
+      if (n > 0) {
+        int i;
+        fprintf(stderr, "We read:\n");
+        for (i = 0; i < n; ++i)
+          fputc(buffer[i], stderr);
+        fprintf(stderr, "\n");
+      } else {
+        if (n != LIBSSH2_ERROR_EAGAIN)
+          fprintf(stderr, "libssh2_channel_read returned %ld\n", n);
+      }
+    } while (n > 0);
+
+    /* this is due to blocking that would occur otherwise so we loop on
+       this condition */
+    if (n == LIBSSH2_ERROR_EAGAIN) {
+      wait(conn);
+    } else
+      break;
+  }
+
   return SSHCON_OK;
 }
 

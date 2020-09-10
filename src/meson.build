@@ -3,7 +3,7 @@ sshcon_lib = static_library(
   sources: ['sshcon.c'],
   include_directories: include_directories('../include'),
   dependencies: [meson.get_compiler('c').find_library('ssh2')],
-  c_args: ['-std=c11', '-Wall', '-Werror'],
+  c_args: cargs,
 )
 
 executable(

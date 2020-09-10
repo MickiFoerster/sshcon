@@ -43,3 +43,4 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err);
 sshcon_status sshconn_authenticate(sshcon_connection *conn);
 sshcon_status sshconn_open_channel(sshcon_connection *conn);
 void sshconn_close_channel(sshcon_connection *conn);
+sshcon_status sshconn_channel_exec(sshcon_connection *conn);
