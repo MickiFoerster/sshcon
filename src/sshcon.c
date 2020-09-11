@@ -76,51 +76,53 @@ void sshcon_disconnect(sshcon_connection *conn) {
 }
 
 sshcon_status sshcon_check_knownhosts(sshcon_connection *conn) {
-  LIBSSH2_KNOWNHOSTS *nh;
-  nh = libssh2_knownhost_init(conn->session);
-  if (!nh) {
-    return SSHCON_ERROR_KNOWNHOST_INIT;
-  }
+    fprintf(stderr, "Verify connection to remote host %s\n", conn->hostname);
 
-  char known_host_file[4096];
-  const char *fingerprint;
-  snprintf(known_host_file, sizeof(known_host_file), "%s/.ssh/known_hosts",
-           getenv("HOME"));
-  int rc = libssh2_knownhost_readfile(nh, known_host_file,
-                                      LIBSSH2_KNOWNHOST_FILE_OPENSSH);
-  if (rc <= 0) {
-    fprintf(stderr, "error: reading known host file error %d\n", rc);
+    LIBSSH2_KNOWNHOSTS *nh;
+    nh = libssh2_knownhost_init(conn->session);
+    if (!nh) {
+        return SSHCON_ERROR_KNOWNHOST_INIT;
+    }
+
+    char known_host_file[4096];
+    const char *fingerprint;
+    snprintf(known_host_file, sizeof(known_host_file), "%s/.ssh/known_hosts",
+            getenv("HOME"));
+    int rc = libssh2_knownhost_readfile(nh, known_host_file,
+            LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+    if (rc <= 0) {
+        fprintf(stderr, "error: reading known host file error %d\n", rc);
+        libssh2_knownhost_free(nh);
+        return SSHCON_ERROR_KNOWNHOST_FILE_READ;
+    }
+
+    size_t len;
+    int type;
+    fingerprint = libssh2_session_hostkey(conn->session, &len, &type);
+    if (!fingerprint) {
+        fprintf(stderr, "error: libssh2_session_hostkey() failed\n");
+        libssh2_knownhost_free(nh);
+        return SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY;
+    }
+
+    struct libssh2_knownhost *host;
+    int check = libssh2_knownhost_checkp(
+            nh, conn->hostname, conn->port, fingerprint, len,
+            LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
     libssh2_knownhost_free(nh);
-    return SSHCON_ERROR_KNOWNHOST_FILE_READ;
-  }
 
-  size_t len;
-  int type;
-  fingerprint = libssh2_session_hostkey(conn->session, &len, &type);
-  if (!fingerprint) {
-    fprintf(stderr, "error: libssh2_session_hostkey() failed\n");
-    libssh2_knownhost_free(nh);
-    return SSHCON_ERROR_KNOWNHOST_GET_HOSTKEY;
-  }
-
-  struct libssh2_knownhost *host;
-  int check = libssh2_knownhost_checkp(
-      nh, conn->hostname, conn->port, fingerprint, len,
-      LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW, &host);
-  libssh2_knownhost_free(nh);
-
-  switch (check) {
-  case LIBSSH2_KNOWNHOST_CHECK_MATCH:
-    return SSHCON_OK;
-  case LIBSSH2_KNOWNHOST_CHECK_FAILURE:
-    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE;
-  case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND:
-    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND;
-  case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
-    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH;
-  default:
-    return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY;
-  }
+    switch (check) {
+        case LIBSSH2_KNOWNHOST_CHECK_MATCH:
+            return SSHCON_OK;
+        case LIBSSH2_KNOWNHOST_CHECK_FAILURE:
+            return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_FAILURE;
+        case LIBSSH2_KNOWNHOST_CHECK_NOTFOUND:
+            return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND;
+        case LIBSSH2_KNOWNHOST_CHECK_MISMATCH:
+            return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH;
+        default:
+            return SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY;
+    }
 }
 
 void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
@@ -237,33 +239,35 @@ sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd) {
   if (rc != 0) {
       return SSHCON_ERROR_CHANNEL_EXEC_COMMAND;
   }
+
   fprintf(stderr, "->%s\n", cmd);
+  return SSHCON_OK;
+}
 
+sshcon_status sshconn_channel_read(sshcon_connection *conn) {
   ssize_t n;
+  char buffer[0x4000];
+  fprintf(stderr, "<-");
   for (;;) {
-    /* loop until we block */
-    do {
-      char buffer[0x4000];
-      n = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
-      if (n > 0) {
-        int i;
-        fprintf(stderr, "<-");
-        for (i = 0; i < n; ++i)
-          fputc(buffer[i], stderr);
-        fprintf(stderr, "\n");
-      } else {
-        if (n != LIBSSH2_ERROR_EAGAIN)
-          fprintf(stderr, "libssh2_channel_read returned %ld\n", n);
-      }
-    } while (n > 0);
+      /* loop until we block */
+      do {
+          n = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
+          if (n > 0) {
+              int i;
+              for (i = 0; i < n; ++i)
+                  fputc(buffer[i], stderr);
+          } 
+      } while (n > 0);
 
-    /* this is due to blocking that would occur otherwise so we loop on
-       this condition */
-    if (n == LIBSSH2_ERROR_EAGAIN) {
-      wait(conn);
-    } else
-      break;
+      /* this is due to blocking that would occur otherwise so we loop on
+         this condition */
+      if (n == LIBSSH2_ERROR_EAGAIN) {
+          wait(conn);
+      } else {
+          break;
+      }
   }
+  fprintf(stderr, "\n");
 
   return SSHCON_OK;
 }

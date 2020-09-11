@@ -35,6 +35,10 @@ int main(int argc, char *argv[]) {
       case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND:
           printf("Host is not known yet\n");
           break;
+      case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH:
+        sshcon_error_info(&conn, err);
+        fprintf(stderr, "warning: We continue nevertheless ...\n");
+        break;
       default:
         sshcon_error_info(&conn, err);
         exit(1);
