@@ -64,6 +64,12 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
+  err = sshconn_channel_read(&conn);
+  if (err != SSHCON_OK) {
+    sshcon_error_info(&conn, err);
+    exit(1);
+  }
+
   sshconn_channel_close(&conn);
 
   sshcon_disconnect(&conn);

@@ -227,12 +227,13 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn) {
 }
 
 sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd) {
+  fprintf(stderr, "->%s\n", cmd);
   int rc;
   for (;;) {
       rc = libssh2_channel_exec(conn->channel, cmd);
       if (rc == LIBSSH2_ERROR_EAGAIN) {
-          wait(conn);
-          continue;
+        wait(conn);
+        continue;
       }
       break;
   }
@@ -240,7 +241,6 @@ sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd) {
       return SSHCON_ERROR_CHANNEL_EXEC_COMMAND;
   }
 
-  fprintf(stderr, "->%s\n", cmd);
   return SSHCON_OK;
 }
 
@@ -267,7 +267,6 @@ sshcon_status sshconn_channel_read(sshcon_connection *conn) {
           break;
       }
   }
-  fprintf(stderr, "\n");
 
   return SSHCON_OK;
 }
@@ -275,9 +274,9 @@ sshcon_status sshconn_channel_read(sshcon_connection *conn) {
 void sshconn_channel_close(sshcon_connection *conn) {
   int exitcode = 127;
   int rc;
+  fprintf(stderr, "closing channel\n");
   char *exitsignal = (char *)"noexitsignal";
   do {
-    wait(conn);
     rc = libssh2_channel_close(conn->channel);
   } while (rc == LIBSSH2_ERROR_EAGAIN);
 
@@ -293,7 +292,6 @@ void sshconn_channel_close(sshcon_connection *conn) {
     fprintf(stderr, "\nEXIT: %d\n", exitcode);
 
   libssh2_channel_free(conn->channel);
-
   conn->channel = NULL;
 }
 
@@ -321,7 +319,7 @@ static int wait(sshcon_connection *conn) {
   fd_set *readfd = NULL;
   int dir;
 
-  timeout.tv_sec = 10;
+  timeout.tv_sec = 1;
   timeout.tv_usec = 0;
 
   FD_ZERO(&fd);

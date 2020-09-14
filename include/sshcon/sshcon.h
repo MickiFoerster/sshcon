@@ -45,3 +45,4 @@ sshcon_status sshconn_authenticate(sshcon_connection *conn);
 sshcon_status sshconn_channel_open(sshcon_connection *conn);
 void sshconn_channel_close(sshcon_connection *conn);
 sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd);
+sshcon_status sshconn_channel_read(sshcon_connection *conn);
