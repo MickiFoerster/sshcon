@@ -164,6 +164,9 @@ void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
           break;
         case SSHCON_ERROR_CHANNEL_OPEN_SESSION:
         case SSHCON_ERROR_CHANNEL_EXEC_COMMAND:
+        case SSHCON_ERROR_CHANNEL_READ:
+        case SSHCON_ERROR_CHANNEL_CLOSE:
+        case SSHCON_ERROR_CHANNEL_FREE:
           libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
           fprintf(stderr, "sshcon error %d: %s\n", err, errmsg);
           break;
@@ -245,54 +248,73 @@ sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd) {
 }
 
 sshcon_status sshconn_channel_read(sshcon_connection *conn) {
-  ssize_t n;
+  ssize_t m, n;
   char buffer[0x4000];
+  char stderr_buffer[0x4000];
   fprintf(stderr, "<-");
   for (;;) {
       /* loop until we block */
       do {
           n = libssh2_channel_read(conn->channel, buffer, sizeof(buffer));
+          m = libssh2_channel_read_stderr(conn->channel, stderr_buffer, sizeof(stderr_buffer));
           if (n > 0) {
-              int i;
-              for (i = 0; i < n; ++i)
+              for (int i = 0; i < n; ++i)
                   fputc(buffer[i], stderr);
           } 
-      } while (n > 0);
+          if (m > 0) {
+              for (int i = 0; i < m; ++i)
+                  fputc(stderr_buffer[i], stderr);
+          } 
+      } while (m > 0 || n > 0);
 
-      /* this is due to blocking that would occur otherwise so we loop on
-         this condition */
-      if (n == LIBSSH2_ERROR_EAGAIN) {
+      if ( n == LIBSSH2_ERROR_EAGAIN || m ==LIBSSH2_ERROR_EAGAIN) {
           wait(conn);
-      } else {
-          break;
+          continue;
       }
-  }
 
-  return SSHCON_OK;
+      if (m == 0 && n == 0) {
+          return SSHCON_OK;
+      }
+
+      return SSHCON_ERROR_CHANNEL_READ;
+  }
 }
 
-void sshconn_channel_close(sshcon_connection *conn) {
-  int exitcode = 127;
-  int rc;
-  fprintf(stderr, "closing channel\n");
-  char *exitsignal = (char *)"noexitsignal";
-  do {
-    rc = libssh2_channel_close(conn->channel);
-  } while (rc == LIBSSH2_ERROR_EAGAIN);
+sshcon_status sshconn_channel_close(sshcon_connection *conn) {
+    int exitcode = 127;
+    int rc;
+    char *exitsignal = (char *)"nosignal";
+    do {
+        rc = libssh2_channel_close(conn->channel);
+    } while (rc == LIBSSH2_ERROR_EAGAIN);
 
-  if (rc == 0) {
+    if (rc != 0) {
+        return SSHCON_ERROR_CHANNEL_CLOSE;
+    }
+
+    while (libssh2_channel_wait_closed(conn->channel) == LIBSSH2_ERROR_EAGAIN) 
+        ;
     exitcode = libssh2_channel_get_exit_status(conn->channel);
-    libssh2_channel_get_exit_signal(conn->channel, &exitsignal, NULL, NULL,
-                                    NULL, NULL, NULL);
-  }
+    libssh2_channel_get_exit_signal(conn->channel, &exitsignal, NULL, NULL, NULL, NULL, NULL);
 
-  if (exitsignal)
-    fprintf(stderr, "\nGot signal: %s\n", exitsignal);
-  else
-    fprintf(stderr, "\nEXIT: %d\n", exitcode);
+    if (exitsignal) {
+        snprintf(conn->exitsignal, sizeof(conn->exitsignal), "%s", exitsignal);
+        conn->exitcode = -1;
+    }
+    else {
+        conn->exitsignal[0] = '\0';
+        conn->exitcode = exitcode;
+    }
 
-  libssh2_channel_free(conn->channel);
-  conn->channel = NULL;
+    do {
+        rc = libssh2_channel_free(conn->channel);
+    } while (rc == LIBSSH2_ERROR_EAGAIN);
+    if (rc != 0) {
+        return SSHCON_ERROR_CHANNEL_FREE;
+    }
+    conn->channel = NULL;
+
+    return SSHCON_OK;
 }
 
 sshcon_status sshconn_channel_open(sshcon_connection *conn) {

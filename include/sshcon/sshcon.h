@@ -24,6 +24,9 @@ typedef enum {
   SSHCON_ERROR_AGENT_AUTH_FAILED,
   SSHCON_ERROR_CHANNEL_OPEN_SESSION,
   SSHCON_ERROR_CHANNEL_EXEC_COMMAND,
+  SSHCON_ERROR_CHANNEL_READ,
+  SSHCON_ERROR_CHANNEL_CLOSE,
+  SSHCON_ERROR_CHANNEL_FREE,
 } sshcon_status;
 
 typedef struct {
@@ -34,6 +37,8 @@ typedef struct {
     LIBSSH2_SESSION *session;
     LIBSSH2_AGENT *agent;
     LIBSSH2_CHANNEL *channel;
+    char exitsignal[8];
+    int exitcode;
 
 } sshcon_connection;
 
@@ -43,6 +48,6 @@ sshcon_status sshcon_check_knownhosts(sshcon_connection *conn);
 void sshcon_error_info(sshcon_connection *conn, sshcon_status err);
 sshcon_status sshconn_authenticate(sshcon_connection *conn);
 sshcon_status sshconn_channel_open(sshcon_connection *conn);
-void sshconn_channel_close(sshcon_connection *conn);
 sshcon_status sshconn_channel_exec(sshcon_connection *conn, const char* cmd);
 sshcon_status sshconn_channel_read(sshcon_connection *conn);
+sshcon_status sshconn_channel_close(sshcon_connection *conn);

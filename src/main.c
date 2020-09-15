@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
   }
   printf("channel open\n");
 
-  err = sshconn_channel_exec(&conn, "hostname");
+  err = sshconn_channel_exec(&conn, "cat /etc/passwd");
   if (err != SSHCON_OK) {
     sshcon_error_info(&conn, err);
     exit(1);
@@ -70,10 +70,19 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
 
-  sshconn_channel_close(&conn);
+  err = sshconn_channel_close(&conn);
+  if (err != SSHCON_OK) {
+    sshcon_error_info(&conn, err);
+    exit(1);
+  }
 
   sshcon_disconnect(&conn);
-  printf("disconnected\n");
+
+  if (conn.exitcode!=-1) {
+      printf("SSH session finished with %d\n", conn.exitcode);
+  } else {
+      printf("SSH session finished with SIGNAL: %s\n", conn.exitsignal);
+  }
 
   return 0;
 }
