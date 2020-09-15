@@ -1,88 +1,37 @@
 #include "sshcon/sshcon.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 int main(int argc, char *argv[]) {
-  sshcon_connection conn;
-  memset(&conn, 0, sizeof(conn));
-  conn.hostname = "192.168.0.15";
-  conn.port = 22;
-  conn.username = getenv("USER");
+  char hostname[16] = "192.168.0.15";
+  uint16_t port = 22;
+  const char *user = getenv("USER");
 
   if (argc>1) {
-      conn.hostname = argv[1];
+    strncpy(hostname, argv[1], sizeof(hostname));
   }
   if (argc>2) {
-      conn.port = atoi(argv[2]);
+    port = atoi(argv[2]);
   }
   if (argc > 3) {
-    conn.username = argv[3];
+    user = argv[3];
   }
 
-  sshcon_status err = sshcon_connect(&conn);
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
-    exit(1);
-  }
-  printf("connected\n");
-
-  err = sshcon_check_knownhosts(&conn);
-  switch (err) {
-      case SSHCON_OK:
-          printf("Host is known\n");
-          break;
-      case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_NOTFOUND:
-          printf("Host is not known yet\n");
-          break;
-      case SSHCON_ERROR_KNOWNHOST_CHECK_HOSTKEY_MISMATCH:
-        sshcon_error_info(&conn, err);
-        fprintf(stderr, "warning: We continue nevertheless ...\n");
-        break;
-      default:
-        sshcon_error_info(&conn, err);
-        exit(1);
-  }
-
-  err = sshconn_authenticate(&conn);
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
-    exit(1);
-  }
-  printf("authenticated\n");
-
-  err = sshconn_channel_open(&conn);
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
-    exit(1);
-  }
-  printf("channel open\n");
-
-  err = sshconn_channel_exec(&conn, "cat /etc/passwd");
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
+  sshcon_connection *conn = sshconn_Open(hostname, port, user, NULL);
+  if (conn == NULL) {
+    fprintf(stderr, "error in Open()\n");
     exit(1);
   }
 
-  err = sshconn_channel_read(&conn);
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
-    exit(1);
-  }
+  sshconn_Run(conn, "ls -l /home");
+  sshconn_Run(conn, "hostname");
+  sshconn_Run(conn, "exit 1");
+  sshconn_Run(conn, "head /proc/cpuinfo");
 
-  err = sshconn_channel_close(&conn);
-  if (err != SSHCON_OK) {
-    sshcon_error_info(&conn, err);
-    exit(1);
-  }
-
-  sshcon_disconnect(&conn);
-
-  if (conn.exitcode!=-1) {
-      printf("SSH session finished with %d\n", conn.exitcode);
-  } else {
-      printf("SSH session finished with SIGNAL: %s\n", conn.exitsignal);
-  }
+  sshconn_Close(conn);
 
   return 0;
 }
+
