@@ -1,6 +1,7 @@
 #pragma once
 #include <libssh2.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct {
   const char *hostname;
@@ -19,4 +20,4 @@ sshcon_connection *sshconn_Open(const char *hostname, uint16_t port,
                                 const char *user, const char *password);
 void sshconn_Close(sshcon_connection *conn);
 int sshconn_Run(sshcon_connection *conn, const char *cmd);
-sshcon_status sshconn_Upload(sshcon_connection *conn, const char *file_to_upload);
+bool sshconn_Upload(sshcon_connection *conn, const char *file_to_upload);

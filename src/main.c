@@ -30,6 +30,8 @@ int main(int argc, char *argv[]) {
   sshconn_Run(conn, "exit 1");
   sshconn_Run(conn, "head /proc/cpuinfo");
 
+  sshconn_Upload(conn, "");
+
   sshconn_Close(conn);
 
   return 0;
