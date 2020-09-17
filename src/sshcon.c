@@ -35,6 +35,7 @@ typedef enum {
   SSHCON_ERROR_CHANNEL_READ,
   SSHCON_ERROR_CHANNEL_CLOSE,
   SSHCON_ERROR_CHANNEL_FREE,
+  SSHCON_ERROR_SFTP_SESSION_INIT,
 } sshcon_status;
 
 static sshcon_status sshcon_connect(sshcon_connection *conn);
@@ -479,5 +480,46 @@ static int wait(sshcon_connection *conn) {
   rc = select(conn->socket + 1, readfd, writefd, NULL, &timeout);
 
   return rc;
+}
+
+sshcon_status sshconn_Upload(sshcon_connection *conn, const char *file_to_upload) {
+    assert(conn->session);
+    fprintf(stderr, "libssh2_sftp_init()!\n");
+    LIBSSH2_SFTP *sftp_session = libssh2_sftp_init(conn->session);
+    LIBSSH2_SFTP_HANDLE *sftp_handle = NULL;
+
+    if(!sftp_session) {
+        fprintf(stderr, "Unable to init SFTP session\n");
+        return SSHCON_ERROR_SFTP_SESSION_INIT;
+    }
+
+    fprintf(stderr, "libssh2_sftp_open()!\n");
+    sftp_handle = libssh2_sftp_open(sftp_session, "/tmp/sftp.test", ???, LIBSSH2_FXF_WRITE, 0);
+
+    if(!sftp_handle) {
+        fprintf(stderr, "Unable to open file with SFTP: %ld\n",
+                libssh2_sftp_last_error(sftp_session));
+        goto shutdown;
+    }
+    fprintf(stderr, "libssh2_sftp_open() is done, now receive data!\n");
+    do {
+        char mem[1024];
+
+        /* loop until we fail */
+        fprintf(stderr, "libssh2_sftp_read()!\n");
+        rc = libssh2_sftp_read(sftp_handle, mem, sizeof(mem));
+        if(rc > 0) {
+            write(1, mem, rc);
+        }
+        else {
+            break;
+        }
+    } while(1);
+
+    libssh2_sftp_close(sftp_handle);
+    libssh2_sftp_shutdown(sftp_session);
+
+
+    return SSHCON_OK;
 }
 
