@@ -41,16 +41,12 @@ static sshcon_status sshcon_connect(sshcon_connection *conn);
 static void sshcon_disconnect(sshcon_connection *conn);
 static void sshcon_error_info(sshcon_connection *conn, sshcon_status err);
 static sshcon_status sshconn_authenticate_with_agent(sshcon_connection *conn);
-// static sshcon_status sshconn_authenticate_with_password(sshcon_connection
-// *conn,
-//                                                        const char *user,
-//                                                        const char *password);
+// static sshcon_status sshconn_authenticate_with_password(sshcon_connection *conn, const char *user, const char *password);
 static sshcon_status sshconn_channel_open(sshcon_connection *conn);
 static sshcon_status sshconn_channel_exec(sshcon_connection *conn,
                                           const char *cmd);
 static sshcon_status sshconn_channel_read(sshcon_connection *conn);
 static sshcon_status sshconn_channel_close(sshcon_connection *conn);
-
 static int wait(sshcon_connection *conn);
 
 int sshconn_Run(sshcon_connection *conn, const char *cmd) {
@@ -449,8 +445,7 @@ static sshcon_status sshconn_channel_open(sshcon_connection *conn) {
   while ((channel = libssh2_channel_open_session(conn->session)) == NULL &&
          libssh2_session_last_error(conn->session, NULL, NULL, 0) ==
              LIBSSH2_ERROR_EAGAIN) {
-    sleep(1);
-    // wait(conn);
+    wait(conn);
   }
   if (channel == NULL) {
     return SSHCON_ERROR_CHANNEL_OPEN_SESSION;
