@@ -36,6 +36,7 @@ typedef enum {
   SSHCON_ERROR_CHANNEL_CLOSE,
   SSHCON_ERROR_CHANNEL_FREE,
   SSHCON_ERROR_SFTP_SESSION_INIT,
+  SSHCON_ERROR_SFTP_OPEN,
 } sshcon_status;
 
 static sshcon_status sshcon_connect(sshcon_connection *conn);
@@ -494,16 +495,15 @@ sshcon_status sshconn_Upload(sshcon_connection *conn, const char *file_to_upload
     }
 
     fprintf(stderr, "libssh2_sftp_open()!\n");
-    sftp_handle = libssh2_sftp_open(sftp_session, "/tmp/sftp.test", ???, LIBSSH2_FXF_WRITE, 0);
-
+    sftp_handle = libssh2_sftp_open(sftp_session, "/tmp/sftp.test", LIBSSH2_FXF_WRITE, 0);
     if(!sftp_handle) {
         fprintf(stderr, "Unable to open file with SFTP: %ld\n",
                 libssh2_sftp_last_error(sftp_session));
-        goto shutdown;
+        return SSHCON_ERROR_SFTP_OPEN;
     }
-    fprintf(stderr, "libssh2_sftp_open() is done, now receive data!\n");
+
     do {
-        char mem[1024];
+        char mem[4096];
 
         /* loop until we fail */
         fprintf(stderr, "libssh2_sftp_read()!\n");
