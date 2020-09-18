@@ -62,6 +62,9 @@ static sshcon_status sshconn_channel_exec(sshcon_connection *conn,
 static sshcon_status sshconn_channel_read(sshcon_connection *conn);
 static sshcon_status sshconn_channel_close(sshcon_connection *conn);
 static int wait(sshcon_connection *conn);
+static sshcon_status sshcon_sftp_upload(sshcon_connection *conn,
+                                        const char *source_file_path,
+                                        const char *target_file_path);
 
 int sshconn_Run(sshcon_connection *conn, const char *cmd) {
   sshcon_status err;
@@ -507,120 +510,14 @@ bool sshconn_Upload(sshcon_connection *conn, const char *source_file_path,
                     const char *target_file_path) {
   if (!conn)
     return false;
-  LIBSSH2_SFTP *sftp_session = NULL;
-  int rc;
-  while ((sftp_session = libssh2_sftp_init(conn->session)) == NULL &&
-         (rc = libssh2_session_last_error(conn->session, NULL, NULL, 0)) ==
-             LIBSSH2_ERROR_EAGAIN) {
-    wait(conn);
-  }
-  if (!sftp_session) {
-    fprintf(stderr, "Unable to init SFTP session: %d\n", rc);
+
+  sshcon_status err;
+  err = sshcon_sftp_upload(conn, source_file_path, target_file_path);
+  if (err != SSHCON_OK) {
+    sshcon_error_info(conn, err);
     return false;
   }
-
-  int fd = open(source_file_path, O_RDONLY);
-  if (fd == -1) {
-    fprintf(stderr, "could not open local file: %s\n", strerror(errno));
-    return false;
-  }
-  struct stat buf;
-  rc = fstat(fd, &buf);
-  if (rc != 0) {
-    fprintf(stderr, "error: fstat() failed: %s\n", strerror(errno));
-    return false;
-  }
-  long to_write = buf.st_size;
-  fprintf(stderr, "bytes to write: %ld\n", to_write);
-
-  if (S_ISDIR(buf.st_mode)) {
-    fprintf(stderr, "error: file to upload %s is a directory\n",
-            source_file_path);
-    return false;
-  }
-  long flags = 0;
-  if (buf.st_mode & S_IRUSR)
-    flags = flags | LIBSSH2_SFTP_S_IRUSR;
-  if (buf.st_mode & S_IWUSR)
-    flags = flags | LIBSSH2_SFTP_S_IWUSR;
-  if (buf.st_mode & S_IXUSR)
-    flags = flags | LIBSSH2_SFTP_S_IXUSR;
-  if (buf.st_mode & S_IRGRP)
-    flags = flags | LIBSSH2_SFTP_S_IRGRP;
-  if (buf.st_mode & S_IWGRP)
-    flags = flags | LIBSSH2_SFTP_S_IWGRP;
-  if (buf.st_mode & S_IXGRP)
-    flags = flags | LIBSSH2_SFTP_S_IXGRP;
-  if (buf.st_mode & S_IROTH)
-    flags = flags | LIBSSH2_SFTP_S_IROTH;
-  if (buf.st_mode & S_IWOTH)
-    flags = flags | LIBSSH2_SFTP_S_IWOTH;
-  if (buf.st_mode & S_IXOTH)
-    flags = flags | LIBSSH2_SFTP_S_IXOTH;
-
-  LIBSSH2_SFTP_HANDLE *sftp_handle = NULL;
-  for (;;) {
-    sftp_handle = libssh2_sftp_open(
-        sftp_session, target_file_path,
-        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, flags);
-    if (sftp_handle == NULL) {
-      rc = libssh2_session_last_error(conn->session, NULL, NULL, 0);
-      if (rc == LIBSSH2_ERROR_EAGAIN) {
-        wait(conn);
-        continue;
-      }
-      fprintf(stderr, "Unable to open file with SFTP: %ld\n",
-              libssh2_sftp_last_error(sftp_session));
-      libssh2_sftp_shutdown(sftp_session);
-      return false;
-    }
-    break;
-  }
-  assert(sftp_handle);
-
-  bool result = false;
-  do {
-    char mem[4096];
-    fprintf(stderr, "read() and libssh2_sftp_write()!\n");
-    ssize_t n = read(fd, mem, sizeof(mem));
-    if (n > 0) {
-      ssize_t m = 0;
-      ssize_t written = 0;
-      for (;;) {
-        m = libssh2_sftp_write(sftp_handle, mem + written, n - written);
-        if (m == LIBSSH2_ERROR_EAGAIN) {
-          wait(conn);
-          continue;
-        } else if (m > 0) {
-          written += m;
-        } else if (m < 0) {
-          char *errmsg;
-          int errlen;
-          libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
-          fprintf(stderr, "error: %s\n", errmsg);
-          close(fd);
-          libssh2_sftp_close(sftp_handle);
-          libssh2_sftp_shutdown(sftp_session);
-          return false;
-        }
-
-        if (written >= n) {
-          break;
-        }
-      }
-      assert((written == n));
-      to_write -= written;
-    } else if (n < 0) {
-      fprintf(stderr, "error: read failed: %s\n", strerror(errno));
-      break;
-    }
-  } while (to_write > 0);
-
-  close(fd);
-  libssh2_sftp_close(sftp_handle);
-  libssh2_sftp_shutdown(sftp_session);
-
-  return result;
+  return true;
 }
 
 typedef struct {
