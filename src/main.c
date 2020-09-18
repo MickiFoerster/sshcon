@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
   sshconn_Run(conn, "exit 1");
   sshconn_Run(conn, "head /proc/cpuinfo");
 
-  sshconn_Upload(conn, "");
+  sshconn_Upload(conn, "/etc/hostname", "hostname.upload");
 
   sshconn_Close(conn);
 

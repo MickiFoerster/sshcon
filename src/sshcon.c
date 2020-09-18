@@ -43,6 +43,12 @@ typedef enum {
   SSHCON_ERROR_CHANNEL_FREE,
   SSHCON_ERROR_SFTP_SESSION_INIT,
   SSHCON_ERROR_SFTP_OPEN,
+  SSHCON_ERROR_SFTP_SESSION_LOCAL_FILE,
+  SSHCON_ERROR_SFTP_SESSION_LOCAL_FSTAT,
+  SSHCON_ERROR_SFTP_SESSION_ISDIR,
+  SSHCON_ERROR_SFTP_SESSION_REMOTE_FILE,
+  SSHCON_ERROR_SFTP_SESSION_REMOTE_WRITE,
+  SSHCON_ERROR_SFTP_SESSION_LOCAL_READ,
 } sshcon_status;
 
 static sshcon_status sshcon_connect(sshcon_connection *conn);
@@ -296,6 +302,12 @@ static void sshcon_error_info(sshcon_connection *conn, sshcon_status err) {
   case SSHCON_ERROR_CHANNEL_FREE:
   case SSHCON_ERROR_SFTP_SESSION_INIT:
   case SSHCON_ERROR_SFTP_OPEN:
+  case SSHCON_ERROR_SFTP_SESSION_LOCAL_FILE:
+  case SSHCON_ERROR_SFTP_SESSION_LOCAL_FSTAT:
+  case SSHCON_ERROR_SFTP_SESSION_ISDIR:
+  case SSHCON_ERROR_SFTP_SESSION_REMOTE_FILE:
+  case SSHCON_ERROR_SFTP_SESSION_REMOTE_WRITE:
+  case SSHCON_ERROR_SFTP_SESSION_LOCAL_READ:
     libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
     fprintf(stderr, "sshcon error %d: %s\n", err, errmsg);
     break;
@@ -491,53 +503,306 @@ static int wait(sshcon_connection *conn) {
   return rc;
 }
 
-bool sshconn_Upload(sshcon_connection *conn, const char *file_to_upload) {
-    assert(conn->session);
-    fprintf(stderr, "libssh2_sftp_init()!\n");
-    LIBSSH2_SFTP *sftp_session = NULL;
-    int rc;
-    while ((sftp_session = libssh2_sftp_init(conn->session)) == NULL &&
-           (rc = libssh2_session_last_error(conn->session, NULL, NULL, 0)) ==
-            LIBSSH2_ERROR_EAGAIN) {
+bool sshconn_Upload(sshcon_connection *conn, const char *source_file_path,
+                    const char *target_file_path) {
+  if (!conn)
+    return false;
+  LIBSSH2_SFTP *sftp_session = NULL;
+  int rc;
+  while ((sftp_session = libssh2_sftp_init(conn->session)) == NULL &&
+         (rc = libssh2_session_last_error(conn->session, NULL, NULL, 0)) ==
+             LIBSSH2_ERROR_EAGAIN) {
+    wait(conn);
+  }
+  if (!sftp_session) {
+    fprintf(stderr, "Unable to init SFTP session: %d\n", rc);
+    return false;
+  }
+
+  int fd = open(source_file_path, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr, "could not open local file: %s\n", strerror(errno));
+    return false;
+  }
+  struct stat buf;
+  rc = fstat(fd, &buf);
+  if (rc != 0) {
+    fprintf(stderr, "error: fstat() failed: %s\n", strerror(errno));
+    return false;
+  }
+  long to_write = buf.st_size;
+  fprintf(stderr, "bytes to write: %ld\n", to_write);
+
+  if (S_ISDIR(buf.st_mode)) {
+    fprintf(stderr, "error: file to upload %s is a directory\n",
+            source_file_path);
+    return false;
+  }
+  long flags = 0;
+  if (buf.st_mode & S_IRUSR)
+    flags = flags | LIBSSH2_SFTP_S_IRUSR;
+  if (buf.st_mode & S_IWUSR)
+    flags = flags | LIBSSH2_SFTP_S_IWUSR;
+  if (buf.st_mode & S_IXUSR)
+    flags = flags | LIBSSH2_SFTP_S_IXUSR;
+  if (buf.st_mode & S_IRGRP)
+    flags = flags | LIBSSH2_SFTP_S_IRGRP;
+  if (buf.st_mode & S_IWGRP)
+    flags = flags | LIBSSH2_SFTP_S_IWGRP;
+  if (buf.st_mode & S_IXGRP)
+    flags = flags | LIBSSH2_SFTP_S_IXGRP;
+  if (buf.st_mode & S_IROTH)
+    flags = flags | LIBSSH2_SFTP_S_IROTH;
+  if (buf.st_mode & S_IWOTH)
+    flags = flags | LIBSSH2_SFTP_S_IWOTH;
+  if (buf.st_mode & S_IXOTH)
+    flags = flags | LIBSSH2_SFTP_S_IXOTH;
+
+  LIBSSH2_SFTP_HANDLE *sftp_handle = NULL;
+  for (;;) {
+    sftp_handle = libssh2_sftp_open(
+        sftp_session, target_file_path,
+        LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC, flags);
+    if (sftp_handle == NULL) {
+      rc = libssh2_session_last_error(conn->session, NULL, NULL, 0);
+      if (rc == LIBSSH2_ERROR_EAGAIN) {
         wait(conn);
+        continue;
+      }
+      fprintf(stderr, "Unable to open file with SFTP: %ld\n",
+              libssh2_sftp_last_error(sftp_session));
+      libssh2_sftp_shutdown(sftp_session);
+      return false;
     }
-    if(!sftp_session) {
-        fprintf(stderr, "Unable to init SFTP session: %d\n", rc);
-        return false;
-    }
+    break;
+  }
+  assert(sftp_handle);
 
-    LIBSSH2_SFTP_HANDLE *sftp_handle = NULL;
-    fprintf(stderr, "libssh2_sftp_open()!\n");
-    sftp_handle = libssh2_sftp_open(sftp_session, "/tmp/sftp.test", LIBSSH2_FXF_WRITE, 0);
-    if(!sftp_handle) {
-        fprintf(stderr, "Unable to open file with SFTP: %ld\n",
-                libssh2_sftp_last_error(sftp_session));
-        libssh2_sftp_shutdown(sftp_session);
-        return false;
-    }
-
-    int fd = open("/tmp/TESTFILE", O_RDONLY);
-    assert(fd);
-    struct stat buf;
-    fstat(fd, &buf);
-    long to_write = buf.st_size;
-    do {
-        char mem[4096];
-        fprintf(stderr, "read() and libssh2_sftp_write()!\n");
-        ssize_t n = read(fd, mem, sizeof(mem));
-        ssize_t written = libssh2_sftp_write(sftp_handle, mem, n);
-        if(written > 0) {
-            to_write -= written;
+  bool result = false;
+  do {
+    char mem[4096];
+    fprintf(stderr, "read() and libssh2_sftp_write()!\n");
+    ssize_t n = read(fd, mem, sizeof(mem));
+    if (n > 0) {
+      ssize_t m = 0;
+      ssize_t written = 0;
+      for (;;) {
+        m = libssh2_sftp_write(sftp_handle, mem + written, n - written);
+        if (m == LIBSSH2_ERROR_EAGAIN) {
+          wait(conn);
+          continue;
+        } else if (m > 0) {
+          written += m;
+        } else if (m < 0) {
+          char *errmsg;
+          int errlen;
+          libssh2_session_last_error(conn->session, &errmsg, &errlen, 0);
+          fprintf(stderr, "error: %s\n", errmsg);
+          close(fd);
+          libssh2_sftp_close(sftp_handle);
+          libssh2_sftp_shutdown(sftp_session);
+          return false;
         }
-        else {
-            break;
+
+        if (written >= n) {
+          break;
         }
-    } while(to_write>0);
+      }
+      assert((written == n));
+      to_write -= written;
+    } else if (n < 0) {
+      fprintf(stderr, "error: read failed: %s\n", strerror(errno));
+      break;
+    }
+  } while (to_write > 0);
 
-    close(fd);
-    libssh2_sftp_close(sftp_handle);
-    libssh2_sftp_shutdown(sftp_session);
+  close(fd);
+  libssh2_sftp_close(sftp_handle);
+  libssh2_sftp_shutdown(sftp_session);
 
-    return SSHCON_OK;
+  return result;
 }
 
+typedef struct {
+  sshcon_connection *conn;
+  const char *source_file_path;
+  const char *target_file_path;
+  int local_file_fd;
+  long local_file_mode;
+  long local_file_size;
+  LIBSSH2_SFTP *sftp_session;
+  LIBSSH2_SFTP_HANDLE *sftp_handle;
+} sshcon_sftp_session;
+
+static sshcon_status sshcon_sftp_session_write(sshcon_sftp_session *sess) {
+  char *errmsg;
+  int errlen;
+  long to_write = sess->local_file_size;
+
+  do {
+    char mem[4096];
+    ssize_t n = read(sess->local_file_fd, mem, sizeof(mem));
+    if (n > 0) {
+      ssize_t m = 0;
+      ssize_t written = 0;
+      for (;;) {
+        m = libssh2_sftp_write(sess->sftp_handle, mem + written, n - written);
+        if (m == LIBSSH2_ERROR_EAGAIN) {
+          wait(sess->conn);
+          continue;
+        } else if (m > 0) {
+          written += m;
+        } else if (m < 0) {
+          libssh2_session_last_error(sess->conn->session, &errmsg, &errlen, 0);
+          fprintf(stderr, "error: %s\n", errmsg);
+          return SSHCON_ERROR_SFTP_SESSION_REMOTE_WRITE;
+        }
+
+        if (written == n) {
+          break;
+        }
+      }
+      to_write -= written;
+    } else if (n < 0) {
+      fprintf(stderr, "error: read failed: %s\n", strerror(errno));
+      return SSHCON_ERROR_SFTP_SESSION_LOCAL_READ;
+    }
+  } while (to_write > 0);
+
+  return SSHCON_OK;
+}
+
+static sshcon_status sshcon_sftp_session_open(sshcon_sftp_session *sess) {
+  char *errmsg;
+  int errlen;
+  int fd = open(sess->source_file_path, O_RDONLY);
+  if (fd == -1) {
+    fprintf(stderr, "could not open local file: %s\n", strerror(errno));
+    return SSHCON_ERROR_SFTP_SESSION_LOCAL_FILE;
+  }
+  sess->local_file_fd = fd;
+
+  struct stat buf;
+  int rc;
+  rc = fstat(fd, &buf);
+  if (rc != 0) {
+    fprintf(stderr, "error: fstat() failed: %s\n", strerror(errno));
+    return SSHCON_ERROR_SFTP_SESSION_LOCAL_FSTAT;
+  }
+  sess->local_file_size = buf.st_size;
+  if (S_ISDIR(buf.st_mode)) {
+    fprintf(stderr, "error: file to upload %s is a directory\n",
+            sess->source_file_path);
+    return SSHCON_ERROR_SFTP_SESSION_ISDIR;
+  }
+
+  long flags = 0;
+  if (buf.st_mode & S_IRUSR)
+    flags = flags | LIBSSH2_SFTP_S_IRUSR;
+  if (buf.st_mode & S_IWUSR)
+    flags = flags | LIBSSH2_SFTP_S_IWUSR;
+  if (buf.st_mode & S_IXUSR)
+    flags = flags | LIBSSH2_SFTP_S_IXUSR;
+  if (buf.st_mode & S_IRGRP)
+    flags = flags | LIBSSH2_SFTP_S_IRGRP;
+  if (buf.st_mode & S_IWGRP)
+    flags = flags | LIBSSH2_SFTP_S_IWGRP;
+  if (buf.st_mode & S_IXGRP)
+    flags = flags | LIBSSH2_SFTP_S_IXGRP;
+  if (buf.st_mode & S_IROTH)
+    flags = flags | LIBSSH2_SFTP_S_IROTH;
+  if (buf.st_mode & S_IWOTH)
+    flags = flags | LIBSSH2_SFTP_S_IWOTH;
+  if (buf.st_mode & S_IXOTH)
+    flags = flags | LIBSSH2_SFTP_S_IXOTH;
+  sess->local_file_mode = flags;
+
+  LIBSSH2_SFTP_HANDLE *sftp_handle = NULL;
+  for (;;) {
+    sftp_handle = libssh2_sftp_open(sess->sftp_session, sess->target_file_path,
+                                    LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT |
+                                        LIBSSH2_FXF_TRUNC,
+                                    sess->local_file_mode);
+    if (sftp_handle == NULL) {
+      rc = libssh2_session_last_error(sess->conn->session, &errmsg, &errlen, 0);
+      if (rc == LIBSSH2_ERROR_EAGAIN) {
+        wait(sess->conn);
+        continue;
+      }
+      libssh2_session_last_error(sess->conn->session, &errmsg, &errlen, 0);
+      fprintf(stderr, "error: %s\n", errmsg);
+      return SSHCON_ERROR_SFTP_SESSION_REMOTE_FILE;
+    }
+    break;
+  }
+  assert(sftp_handle);
+  sess->sftp_handle = sftp_handle;
+
+  return SSHCON_OK;
+}
+
+static sshcon_status sshcon_sftp_session_init(sshcon_sftp_session *sess) {
+  LIBSSH2_SFTP *tmp_sftp_session;
+  char *errmsg;
+  int errlen;
+  int rc;
+
+  for (;;) {
+    tmp_sftp_session = libssh2_sftp_init(sess->conn->session);
+    if (tmp_sftp_session == NULL) {
+      rc = libssh2_session_last_error(sess->conn->session, &errmsg, &errlen, 0);
+      if (rc == LIBSSH2_ERROR_EAGAIN) {
+        wait(sess->conn);
+        continue;
+      }
+      fprintf(stderr, "error: %s\n", errmsg);
+      return SSHCON_ERROR_SFTP_SESSION_INIT;
+    }
+    break;
+  }
+
+  sess->sftp_session = tmp_sftp_session;
+  return SSHCON_OK;
+}
+
+static void sshcon_sftp_session_close(sshcon_sftp_session *sess) {
+  if (sess->local_file_fd != -1)
+    close(sess->local_file_fd);
+  if (sess->sftp_handle != NULL)
+    libssh2_sftp_close(sess->sftp_handle);
+  if (sess->sftp_session != NULL)
+    libssh2_sftp_shutdown(sess->sftp_session);
+}
+
+static sshcon_status sshcon_sftp_upload(sshcon_connection *conn,
+                                        const char *source_file_path,
+                                        const char *target_file_path) {
+  sshcon_sftp_session sftp_session = {.conn = conn,
+                                      .source_file_path = source_file_path,
+                                      .target_file_path = target_file_path,
+                                      .local_file_fd = -1,
+                                      .local_file_mode = 0,
+                                      .local_file_size = 0,
+                                      .sftp_session = NULL,
+                                      .sftp_handle = NULL};
+  sshcon_status err;
+
+  err = sshcon_sftp_session_init(&sftp_session);
+  if (err != SSHCON_OK) {
+    return err;
+  }
+
+  err = sshcon_sftp_session_open(&sftp_session);
+  if (err != SSHCON_OK) {
+    return err;
+  }
+
+  err = sshcon_sftp_session_write(&sftp_session);
+  if (err != SSHCON_OK) {
+    return err;
+  }
+
+  sshcon_sftp_session_close(&sftp_session);
+
+  return SSHCON_OK;
+}
