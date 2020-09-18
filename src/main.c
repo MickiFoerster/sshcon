@@ -30,7 +30,9 @@ int main(int argc, char *argv[]) {
   sshconn_Run(conn, "exit 1");
   sshconn_Run(conn, "head /proc/cpuinfo");
 
-  sshconn_Upload(conn, "/etc/hostname", "hostname.upload");
+  sshconn_Upload(conn, "test.sh", "/tmp/test.sh");
+  sshconn_Run(conn, "/tmp/test.sh");
+  sshconn_Run(conn, "rm -f /tmp/test.sh");
 
   sshconn_Close(conn);
 
